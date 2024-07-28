@@ -13,11 +13,17 @@ def take_in_data():
     global esp8266_data
     fil_nam = make_filename()
     esp8266_data = request.args.get('data')
-
+    
     tim_stam = time.asctime()
+    results = []
+    results.append(tim_stam)
+    for k in request.args.keys():
+        results.append(k)
+        results.append(request.args.get(k))
     with open(fil_nam, 'a') as t:
         writer = csv.writer(t, delimiter=',')
-        writer.writerow([tim_stam, esp8266_data])
+        # writer.writerow([tim_stam, esp8266_data])
+        writer.writerow(results)
 
     return f"data: {request.args.get('data')}"
 
