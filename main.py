@@ -3,6 +3,8 @@ from flask import Flask, render_template, request
 import time
 import csv
 import random
+import os
+import pickle
 from bokeh.plotting import figure
 from bokeh.resources import CDN
 from bokeh.embed import file_html
@@ -11,6 +13,22 @@ from utilities import make_filename
 app = Flask(__name__)
 count = 0
 esp8266_data = 0
+
+if not os.path.isfile("data.pickle"):
+    fp = open("data.pickle", "x")
+    fp.close()
+try:
+    with open("data.pickle", "rb") as fp:
+        big_count = pickle.load(fp)
+except EOFError:
+    # first time through should be 0
+    big_count = -1
+
+big_count += 1
+
+# update our launch count
+with open("data.pickle", "wb") as fp:
+    pickle.dump(big_count, fp)
 
 
 @app.route('/plot')
@@ -48,6 +66,7 @@ def take_in_data():
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    global big_count
     global count
     count += 1
     # templateData = {
@@ -61,6 +80,7 @@ def index():
     return render_template('index.html',
                            title="Hello!",
                            num=temp_num,
+                           big_num=big_count,
                            data=esp8266_data
                            )
 
