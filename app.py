@@ -50,10 +50,11 @@ def plot_data():
 
 @app.route('/query-data', methods=['GET'])
 def take_in_data():
-    # global esp8266_data
+    global esp8266_data
     fil_nam = data_dir + "/" + make_filename()
     # esp8266_data = request.args.get('data')
     incoming_data = request.args.get('data')
+    esp8266_data = incoming_data
 
     tim_stam = time.asctime()
     results = []
