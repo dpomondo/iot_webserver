@@ -1,6 +1,10 @@
 <!DOCTYPE html>
+<html lang="en">
   <head>
     <title>{{ title }}</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="static/styles.css">
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script>
     <script type="text/javascript" charset="utf-8">
@@ -31,10 +35,14 @@
     </script>
   </head>
   <body>
-    <h1>Hello World!</h1>
-    <p>Connected: <span id="connected">...</span></p>
-    <h2>The magic number is {{ num }}</h2>
-    <h3>little device sent: <span id="little_guy"> initial: {{ data }}</span></h3>
-    <p>the total number of times we've been here: {{ big_num }}</p>
+    <div id="top_of_page">
+      <h1>Hello World!</h1>
+    </div>
+    <div id="main_junk">
+      <p id="connect_tag">Connected: <span id="connected">...</span></p>
+      <h2 id="reload_tag">The magic number is {{ num }}</h2>
+      <h3 id="results_tag">little device sent: <span id="little_guy"> initial: {{ data }}</span></h3>
+      <p id="server_reload_tag">the total number of times we've been here: {{ big_num }}</p>
+    </div>
   </body>
 </html>
