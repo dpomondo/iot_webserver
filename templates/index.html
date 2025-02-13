@@ -31,6 +31,11 @@
           $("#little_guy").html("received: " + message.data);
         });
 
+        socket.on('mqtt_message', function(message) {
+          console.log("--> received mqtt message");
+          $("#mqtt_message_text").html("received " + message.payload);
+        });
+
       } );
     </script>
   </head>
@@ -39,10 +44,21 @@
       <h1>Hello World!</h1>
     </div>
     <div id="main_junk">
-      <p id="connect_tag">Connected: <span id="connected">...</span></p>
-      <h2 id="reload_tag">The magic number is {{ num }}</h2>
-      <h3 id="results_tag">little device sent: <span id="little_guy"> initial: {{ data }}</span></h3>
-      <p id="server_reload_tag">the total number of times we've been here: {{ big_num }}</p>
+      <div id = "connect_tag">
+        <p >Connected: <span id="connected">...</span></p>
+      </div>
+      <div id="reload_tag">
+        <h2 >The magic number is {{ num }}</h2>
+      </div>
+      <div id="results_tag">
+        <h3 >little device sent: <span id="little_guy"> initial: {{ data }}</span></h3>
+      </div>
+      <div id="server_reload_tag">
+        <p>the total number of times we've been here: {{ big_num }}</p>
+      </div>
+      <div id="mqtt_test">
+        <p>MQTT test: <span id="mqtt_message_text">...</span></p>
+      </div>
     </div>
   </body>
 </html>

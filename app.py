@@ -1,18 +1,29 @@
 #!/usr/bin/env python3
 from flask import Flask, render_template, request
 from flask_socketio import SocketIO, send, emit
+from flask_mqtt import Mqtt
 import time
 import csv
 import random
 import os
 import pickle
+import json
 from bokeh.plotting import figure
 from bokeh.resources import CDN
 from bokeh.embed import file_html
 from utilities import make_filename
 
 app = Flask(__name__)
+
+app.config['MQTT_BROKER_URL'] = '0.0.0.0'  # localhost
+app.config['MQTT_BROKER_PORT'] = 1883  # default port for non-tls connection
+app.config['MQTT_USERNAME'] = ''  # set the username here if you need authentication for the broker
+app.config['MQTT_PASSWORD'] = ''  # set the password here if the broker demands authentication
+app.config['MQTT_KEEPALIVE'] = 5  # set the time interval for sending a ping to the broker to 5 seconds
+app.config['MQTT_TLS_ENABLED'] = False  # set TLS to disabled for testing purposes
+
 socketio = SocketIO(app)
+mqtt = Mqtt(app)
 count = 0
 esp8266_data = 0
 data_dir = "data"
@@ -99,7 +110,9 @@ def index():
 @socketio.on('connect')
 def handle_connect():
     print(f"Client {request.sid} connected")
+    mqtt.subscribe('test/webserver')
     emit("data", esp8266_data)
+    emit("mqtt_message", "null")
 
 
 @socketio.on('disconnect')
@@ -117,6 +130,15 @@ def handle_data(json):
 def handle_my_event(json):
     print(f"received: {str(json)}")
 
+
+@mqtt.on_message()
+def handle_mqtt_message(client, userdata, message):
+        data = dict(
+                    topic=message.topic,
+                    payload=message.payload.decode()
+                )
+        socketio.emit('mqtt_message', data=data, namespace='/')
+    
 
 if __name__ == '__main__':
     # app.run(debug=True, port=80, host='0.0.0.0')
