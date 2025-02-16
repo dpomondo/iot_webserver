@@ -10,6 +10,7 @@
     <script type="text/javascript" charset="utf-8">
       $(document).ready(function() {
         $("#connected").html("Maybe");
+      } );
 
         var socket = io.connect();
 
@@ -27,16 +28,20 @@
         });
         
         socket.on('esp_data', function(message) {
-          console.log("--->received data");
+          console.log("--->received esp_data");
           $("#little_guy").html("received: " + message.data);
+        });
+        
+        socket.on('data', function(message) {
+          console.log("---> received raw data");
+          $("#little_guy").html("raw: " + message);
         });
 
         socket.on('mqtt_message', function(message) {
           console.log("--> received mqtt message");
-          $("#mqtt_message_text").html("received " + message.payload);
+        $("#mqtt_message_text").html("<br>received: " + message.payload + "<br>from: " + message.topic);
         });
 
-      } );
     </script>
   </head>
   <body>

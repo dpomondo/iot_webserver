@@ -110,6 +110,7 @@ def index():
 @socketio.on('connect')
 def handle_connect():
     print(f"Client {request.sid} connected")
+    # mqtt.subscribe('test/webserver')
     mqtt.subscribe('test/webserver')
     emit("data", esp8266_data)
     emit("mqtt_message", "null")
@@ -133,12 +134,16 @@ def handle_my_event(json):
 
 @mqtt.on_message()
 def handle_mqtt_message(client, userdata, message):
-        data = dict(
-                    topic=message.topic,
-                    payload=message.payload.decode()
-                )
-        socketio.emit('mqtt_message', data=data, namespace='/')
-    
+    data = dict(
+        topic=message.topic,
+        payload=message.payload.decode()
+    )
+    print(f"-->received {data["topic"]}: {data["payload"]}")
+    esp8266_data = data["payload"]
+    socketio.emit("data", esp8266_data, namespace='/')
+    socketio.emit('mqtt_message', data=data, namespace='/')
+    mqtt.publish('test/littleguy', f"snd->{esp8266_data}")
+
 
 if __name__ == '__main__':
     # app.run(debug=True, port=80, host='0.0.0.0')
