@@ -139,10 +139,28 @@ def handle_mqtt_message(client, userdata, message):
         payload=message.payload.decode()
     )
     print(f"-->received {data["topic"]}: {data["payload"]}")
-    esp8266_data = data["payload"]
-    socketio.emit("data", esp8266_data, namespace='/')
+    try:
+        try:
+            esp8266_data = json.loads(data["payload"].replace("'", '"'))
+            print("(bad quotes in string) ", end='')
+        except json.decoder.JSONDecodeError:
+            esp8266_data = json.loads(data["payload"])
+        if isinstance(esp8266_data, dict):
+            print("json data decoded to dict\n----------------------")
+            # for k in esp8266_data.keys(): print(f"\t{k}:\t{esp8266_data[k]}")
+            print(json.dumps(esp8266_data, sort_keys=True, indent=4))
+            socketio.emit("data", esp8266_data.get('temp', {}).get('result', 'null'), namespace='/')
+        else:
+            print(f"data returned as type {type(data["payload"])}")
+            socketio.emit("data", data["payload"], namespace='/')
+    except:
+        print("bad json decoding!")
+        esp8266_data = data["payload"]
+        socketio.emit("data", data["payload"], namespace='/')
+    return_data = f"snd->{esp8266_data}"
+    # socketio.emit("data", return_data, namespace='/')
     socketio.emit('mqtt_message', data=data, namespace='/')
-    mqtt.publish('test/littleguy', f"snd->{esp8266_data}")
+    mqtt.publish('test/littleguy', return_data.encode())
 
 
 if __name__ == '__main__':

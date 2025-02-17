@@ -34,7 +34,7 @@
         
         socket.on('data', function(message) {
           console.log("---> received raw data");
-          $("#little_guy").html("raw: " + message);
+          $("#little_guy").html(message);
         });
 
         socket.on('mqtt_message', function(message) {
@@ -56,7 +56,7 @@
         <h2 >The magic number is {{ num }}</h2>
       </div>
       <div id="results_tag">
-        <h3 >little device sent: <span id="little_guy"> initial: {{ data }}</span></h3>
+        <h3 ><span id="device_direction">little device sent: </span><span id="little_guy"> initial: {{ data }}</span></h3>
       </div>
       <div id="server_reload_tag">
         <p>the total number of times we've been here: {{ big_num }}</p>
