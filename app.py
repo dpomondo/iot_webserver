@@ -145,11 +145,15 @@ def handle_mqtt_message(client, userdata, message):
             print("(bad quotes in string) ", end='')
         except json.decoder.JSONDecodeError:
             esp8266_data = json.loads(data["payload"])
+            print("(data decoded just fine) ", end='')
         if isinstance(esp8266_data, dict):
             print("json data decoded to dict\n----------------------")
             # for k in esp8266_data.keys(): print(f"\t{k}:\t{esp8266_data[k]}")
             print(json.dumps(esp8266_data, sort_keys=True, indent=4))
-            socketio.emit("data", esp8266_data.get('temp', {}).get('result', 'null'), namespace='/')
+            temperature = esp8266_data.get('temp_f', {}).get('result', None)
+            if temperature is not None:
+                temperature = round(temperature, 2)
+            socketio.emit("data", temperature, namespace='/')
         else:
             print(f"data returned as type {type(data["payload"])}")
             socketio.emit("data", data["payload"], namespace='/')
