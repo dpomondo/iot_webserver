@@ -8,19 +8,26 @@ import random
 import os
 import pickle
 import json
+import threading
+import queue
 from bokeh.plotting import figure
 from bokeh.resources import CDN
 from bokeh.embed import file_html
 from utilities import make_filename
 
 app = Flask(__name__)
+task_queue = queue.Queue()
 
 app.config['MQTT_BROKER_URL'] = '0.0.0.0'  # localhost
 app.config['MQTT_BROKER_PORT'] = 1883  # default port for non-tls connection
-app.config['MQTT_USERNAME'] = ''  # set the username here if you need authentication for the broker
-app.config['MQTT_PASSWORD'] = ''  # set the password here if the broker demands authentication
-app.config['MQTT_KEEPALIVE'] = 5  # set the time interval for sending a ping to the broker to 5 seconds
-app.config['MQTT_TLS_ENABLED'] = False  # set TLS to disabled for testing purposes
+# set the username here if you need authentication for the broker
+app.config['MQTT_USERNAME'] = ''
+# set the password here if the broker demands authentication
+app.config['MQTT_PASSWORD'] = ''
+# set the time interval for sending a ping to the broker to 5 seconds
+app.config['MQTT_KEEPALIVE'] = 5
+# set TLS to disabled for testing purposes
+app.config['MQTT_TLS_ENABLED'] = False
 
 socketio = SocketIO(app)
 mqtt = Mqtt(app)
@@ -45,6 +52,21 @@ big_count += 1
 # update our launch count
 with open(data_dir + "/" + "data.pickle", "wb") as fp:
     pickle.dump(big_count, fp)
+
+
+def worker_function():
+    while True:
+        func, args, kwargs = task_queue.get()
+        print(f"trying to run {func} with {args} and {kwargs}... ", end='')
+        try:
+            func(*args, **kwargs)
+            print("worked!")
+        except Exception as e:
+            print(f"task queue failed: {e}")
+        task_queue.task_done()
+
+
+threading.Thread(target=worker_function, daemon=True).start()
 
 
 @app.route('/plot')
@@ -153,18 +175,25 @@ def handle_mqtt_message(client, userdata, message):
             temperature = esp8266_data.get('temp_f', {}).get('result', None)
             if temperature is not None:
                 temperature = round(temperature, 2)
-            socketio.emit("data", temperature, namespace='/')
+            # socketio.emit("data", temperature, namespace='/')
+            task_queue.put(
+                (socketio.emit, ["data", temperature], {"namespace": '/'}))
         else:
             print(f"data returned as type {type(data["payload"])}")
-            socketio.emit("data", data["payload"], namespace='/')
+            # socketio.emit("data", data["payload"], namespace='/')
+            task_queue.put(
+                # (socketio.emit, "data", {"data": data["payload"], "namespace": '/'}))
+                (socketio.emit, ["data", data["payload"]], {"namespace": '/'}))
     except:
         print("bad json decoding!")
         esp8266_data = data["payload"]
         socketio.emit("data", data["payload"], namespace='/')
     return_data = f"snd->{esp8266_data}"
     # socketio.emit("data", return_data, namespace='/')
-    socketio.emit('mqtt_message', data=data, namespace='/')
-    mqtt.publish('test/littleguy', return_data.encode())
+    # socketio.emit('mqtt_message', data=data, namespace='/')
+    task_queue.put((socketio.emit, ['mqtt_message', data], {"namespace": '/'}))
+    # mqtt.publish('test/littleguy', return_data.encode())
+    task_queue.put((mqtt.publish, ['test/littleguy', return_data.encode()], {}))
 
 
 if __name__ == '__main__':
