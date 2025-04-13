@@ -10,13 +10,22 @@ import pickle
 import json
 import threading
 import queue
+from math import nan, isnan
 from bokeh.plotting import figure
+from bokeh.models import Range1d, LinearAxis, Title
 from bokeh.resources import CDN
-from bokeh.embed import file_html
+# from bokeh.embed import file_html
+from bokeh.embed import components
 from utilities import make_filename
 
 app = Flask(__name__)
 task_queue = queue.Queue()
+LEN_TEMP_DATA = 20
+temperature_data = []
+humidity_data = []
+for i in range(LEN_TEMP_DATA):
+    temperature_data.append(nan)
+    humidity_data.append(nan)
 
 app.config['MQTT_BROKER_URL'] = '0.0.0.0'  # localhost
 app.config['MQTT_BROKER_PORT'] = 1883  # default port for non-tls connection
@@ -69,16 +78,50 @@ def worker_function():
 threading.Thread(target=worker_function, daemon=True).start()
 
 
-@app.route('/plot')
-def plot_data():
-    plot = figure()
-    y = []
-    for i in range(1, 11):
-        y.append(round(100 * random.random(), 1))
-    plot.scatter(list(range(1, 11)), y)
+def append_data(new_temp, new_humidity):
+    temperature_data.append(new_temp)
+    humidity_data.append(new_humidity)
+    while len(temperature_data) > LEN_TEMP_DATA:
+        temperature_data.pop(0)
+        humidity_data.pop(0)
+    assert len(temperature_data) == len(humidity_data)
+    # print("new temp data: " + str(temperature_data))
+    task_queue.put((plot_data, [], {}))
 
-    html = file_html(plot, CDN, "my plot")
-    return html
+
+def plot_data():
+    print("\tPlotting...")
+    plot = figure(width=700, height=300, toolbar_location=None)
+    plot.extra_y_ranges['foo'] = Range1d(0, 100)
+    hum_y = LinearAxis(
+                axis_label="humidity",
+                # x_range_name='foo',
+                y_range_name='foo')
+    hum_y.axis_label_text_color='blue'
+    if nan in temperature_data:
+        td_int = [n for n in temperature_data if not isnan(n)]
+        print(f"\tnum:{len(td_int)}\tgood temp values:{str(td_int)}")
+        floor = int(min(td_int) / 5) * 5
+        ceiling = (int(max(td_int) / 5) * 5) + 5
+    else:
+        floor = int(min(temperature_data) / 5) * 5
+        ceiling = (int(max(temperature_data) / 5) * 5) + 5
+    print(f"\tfloor: {floor}\tceiling: {ceiling}")
+    plot.y_range = Range1d(floor, ceiling)
+    # x = list(range(1, len(temperature_data) + 1))
+    x = list(range(0, LEN_TEMP_DATA))
+    plot.x_range = Range1d(x[0]-1, x[-1]+2)
+    plot.add_layout(hum_y, "right")
+    plot.add_layout(Title(text="Temp in °F",
+                          align="center",
+                          text_color="red",
+                          text_font_style="italic"),
+                    "left")
+    plot.step(x, temperature_data, mode="center", color="red")
+    plot.step(x, humidity_data, mode="center", color="blue", y_range_name="foo")
+    script, div = components(plot)
+    socketio.emit('draw_plot', {'plot_script': script,
+                  'plot_div': div}, namespace='/')
 
 
 @app.route('/query-data', methods=['GET'])
@@ -173,11 +216,16 @@ def handle_mqtt_message(client, userdata, message):
             # for k in esp8266_data.keys(): print(f"\t{k}:\t{esp8266_data[k]}")
             print(json.dumps(esp8266_data, sort_keys=True, indent=4))
             temperature = esp8266_data.get('temp_f', {}).get('result', None)
+            humidity = esp8266_data.get('humidity', {}).get('result', None)
             if temperature is not None:
                 temperature = round(temperature, 2)
+            if humidity is not None:
+                humidity = round(humidity, 2)
             # socketio.emit("data", temperature, namespace='/')
             task_queue.put(
                 (socketio.emit, ["data", temperature], {"namespace": '/'}))
+            task_queue.put((append_data, [], {"new_temp": temperature,
+                                              "new_humidity": humidity}))
         else:
             print(f"data returned as type {type(data["payload"])}")
             # socketio.emit("data", data["payload"], namespace='/')
@@ -193,7 +241,8 @@ def handle_mqtt_message(client, userdata, message):
     # socketio.emit('mqtt_message', data=data, namespace='/')
     task_queue.put((socketio.emit, ['mqtt_message', data], {"namespace": '/'}))
     # mqtt.publish('test/littleguy', return_data.encode())
-    task_queue.put((mqtt.publish, ['test/littleguy', return_data.encode()], {}))
+    task_queue.put(
+        (mqtt.publish, ['test/littleguy', return_data.encode()], {}))
 
 
 if __name__ == '__main__':

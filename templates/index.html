@@ -7,6 +7,8 @@
     <link rel="stylesheet" href="static/styles.css">
     <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js" integrity="sha512-q/dWJ3kcmjBLU4Qc47E4A9kTB4m3wuTY7vkFJDTZKjTs8jhyGQnaUrxa0Ytd0ssMZhbNua9hE+E7Qv1j+DyZwA==" crossorigin="anonymous"></script>
+    <script src="https://cdn.bokeh.org/bokeh/release/bokeh-3.5.0.min.js"
+        crossorigin="anonymous"></script>
     <script type="text/javascript" charset="utf-8">
       $(document).ready(function() {
         $("#connected").html("Maybe");
@@ -42,6 +44,12 @@
         $("#mqtt_message_text").html("<br>received: " + message.payload + "<br>from: " + message.topic);
         });
 
+        socket.on('draw_plot', function(message) {
+          console.log("--> call to draw_plot");
+        $("#script_goes_here").html(message.plot_script);
+        $("#div_goes_here").html(message.plot_div);
+        });
+
     </script>
   </head>
   <body>
@@ -61,6 +69,8 @@
       <div id="server_reload_tag">
         <p>the total number of times we've been here: {{ big_num }}</p>
       </div>
+      <div id="script_goes_here"></div>
+      <div id="div_goes_here"></div>
       <div id="mqtt_test">
         <p>MQTT test: <span id="mqtt_message_text">...</span></p>
       </div>
