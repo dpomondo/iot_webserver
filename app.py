@@ -3,6 +3,7 @@ from flask import Flask, render_template, request
 from flask_socketio import SocketIO, send, emit
 from flask_mqtt import Mqtt
 import time
+from datetime import datetime, timedelta
 import csv
 # import random
 import os
@@ -10,53 +11,55 @@ import pickle
 import json
 import threading
 import queue
+import traceback
 from math import nan, isnan
 from bokeh.plotting import figure
-from bokeh.models import Range1d, LinearAxis, Title
+from bokeh.models import Range1d, LinearAxis, Title, Legend
 from bokeh.resources import CDN
 # from bokeh.embed import file_html
 from bokeh.embed import components
 from utilities import make_filename
+# from datastream import DataStream, temperature_colors, humidity_colors, dashes
+from datastream import DataStream
 
 app = Flask(__name__)
 task_queue = queue.Queue()
-LEN_TEMP_DATA = 20
+LEN_TEMP_DATA = 80
+plot_time_range = timedelta(minutes=30)
 
-dashes = [[3, 4], [2, 2], [5, 9], []]
-temperature_colors = ["FireBrick", "DarkRed", "DeepPink", "Red"]
-humidity_colors = ["DodgerBlue", "DeepBlueSky", "CadetBlue", "CornflowerBlue"]
+write_delta = timedelta(seconds=30)
+plot_delta = timedelta(seconds=30)
+disk_write_delta = timedelta(minutes=15)
+# call plot first time we get there
+previous_plot = datetime.now() - plot_delta
+# old_script, old_div = None, None
+
+time_format_string = "%Y-%m-%dT%H:%M:%S"
 
 
-class DataStream:
-    def __init__(self, name, mqtt_address):
-        self.name = name
-        self.mqtt_address = mqtt_address
-        self.temperature_data = []
-        self.humidity_data = []
-        for i in range(LEN_TEMP_DATA):
-            self.temperature_data.append(nan)
-            self.humidity_data.append(nan)
-        self.line_dash = dashes.pop()
-        self.temp_line_color = temperature_colors.pop()
-        self.hum_line_color = humidity_colors.pop()
+def time_check(strm, new_temp, new_humidity):
+    if (new_temp == nan) or (new_humidity == nan):
+        raise ValueError("Trying to append nan to time series")
+    now = datetime.now()
+    if now > strm.previous_write + write_delta:
+        # strm.append_data(new_temp, new_humidity)
+        task_queue.put((strm.append_data, [new_temp, new_humidity], {}))
+        strm.previous_write = now   # should this be INSIDE the class method?
+        strm.new_data_flag = True
 
-    def append_data(self, new_temp, new_humidity):
-        self.temperature_data.append(new_temp)
-        self.humidity_data.append(new_humidity)
-        while len(self.temperature_data) > LEN_TEMP_DATA:
-            self.temperature_data.pop(0)
-            self.humidity_data.pop(0)
-        assert len(self.temperature_data) == len(self.humidity_data)
-        print(f"\t{self.name} has new data: {self.temperature_data}\t{self.humidity_data}")
-
+    global previous_plot
+    if now > previous_plot + plot_delta:
         task_queue.put((plot_data, [], {}))
+        # plot_flag = set([st.new_data_flag for st in streams.values()])
+        # if False not in plot_flag:
+        #     task_queue.put((plot_data, [], {}))
+        #     # previous_plot = now
+        #     for st in streams.values():
+        #         st.new_data_flag = False
 
-    def __str__(self):
-        return f"name: {self.name}\taddress: {self.mqtt_address}\n\tline colors: {self.temp_line_color}, {self.hum_line_color}\n\tdashes: {self.line_dash}"
 
-
-initial_names = ['garage/desk', 'attic']
-initial_locations = ['test/garage', 'test/webserver']
+initial_names = ['garage/desk', 'attic', 'garage/attic']
+initial_locations = ['garage/desk', 'test/webserver', 'garage/attic']
 streams = {}
 
 app.config['MQTT_BROKER_URL'] = '0.0.0.0'  # localhost
@@ -72,9 +75,9 @@ app.config['MQTT_TLS_ENABLED'] = False
 
 socketio = SocketIO(app)
 
-# these need to be next to each other! a delay between the Mqtt(app) call 
-# and invoking the on_connect function might mean that the connection 
-# if up and running BEFORE the handler gets registered.
+# these need to be next to each other! a delay between the Mqtt(app) call
+# and invoking the on_connect function might mean that the connection
+# is up and running BEFORE the handler gets registered.
 mqtt = Mqtt(app)
 
 
@@ -84,16 +87,25 @@ def handle_mqtt_connect(client, userdata, flags, rc):
     if len(streams) == 0:
         for nam in range(len(initial_names)):
             streams[initial_names[nam]] = DataStream(
-                initial_names[nam], initial_locations[nam])
+                initial_names[nam],
+                initial_locations[nam],
+                LEN_TEMP_DATA,
+                write_delta)
             print(f"new object:\n\t{streams[initial_names[nam]]}")
 
         for k in streams:
             print(f"{k} is key for DataStream object {streams[k]}")
 
-    for strm in streams:
-        print(
-            f"subscribing to {streams[strm].mqtt_address} for device {streams[strm].name}")
-        mqtt.subscribe(streams[strm].mqtt_address)
+    for strm in streams.values():
+        targets = [strm.mqtt_address,
+                   strm.mqtt_address + "/mqtt_reset",
+                   strm.mqtt_address + "/wireless_reset",
+                   strm.mqtt_address + "/power_status",
+                   strm.mqtt_address + "/watchdog_reset"]
+        for t in targets:
+            print(
+                f"subscribing to {t} for device {strm.name}")
+            mqtt.subscribe(t)
     # mqtt.subscribe('test/webserver')
 
 
@@ -105,18 +117,34 @@ if not os.path.isfile(data_dir + "/" + "data.pickle"):
     # fp = open("data.pickle", "x")
     fp = open(data_dir + "/" + "data.pickle", "x")
     fp.close()
-try:
-    with open(data_dir + "/" + "data.pickle", "rb") as fp:
-        big_count = pickle.load(fp)
-except EOFError:
-    # first time through should be 0
-    big_count = -1
+    big_coount = -1
+else:
+    try:
+        with open(data_dir + "/" + "data.pickle", "rb") as fp:
+            big_count = pickle.load(fp)
+    except EOFError:
+        # first time through should be 0
+        big_count = -1
 
 big_count += 1
 
 # update our launch count
 with open(data_dir + "/" + "data.pickle", "wb") as fp:
     pickle.dump(big_count, fp)
+
+# do we have an old plot we can recycle?
+if not os.path.isfile(data_dir + "/" + "plot_bak.pickle"):
+    fp = open(data_dir + "/" + "plot_bak.pickle", "x")
+    fp.close()
+    old_script, old_div = None, None
+else:
+    try:
+        with open(data_dir + "/" + "plot_bak.pickle", "rb") as fp:
+            plot_pickle = pickle.load(fp)
+            old_script = plot_pickle["script"]
+            old_div = plot_pickle["div"]
+    except EOFError:
+        old_script, old_div = None, None
 
 
 def worker_function():
@@ -128,6 +156,8 @@ def worker_function():
             print("worked!")
         except Exception as e:
             print(f"task queue failed: {e}")
+            error_trace = traceback.format_exc()
+            print(error_trace)
         task_queue.task_done()
 
 
@@ -135,13 +165,20 @@ threading.Thread(target=worker_function, daemon=True).start()
 
 
 def plot_data():
+    global old_script
+    global old_div
+    global previous_plot
+    # clear_screen_ansi()
     print("\tPlotting...")
-    plot = figure(width=700, height=300, toolbar_location=None)
+    plot = figure(width=900, height=500,
+                  x_axis_type="datetime",
+                  toolbar_location=None)
     plot.extra_y_ranges['foo'] = Range1d(0, 100)
     hum_y = LinearAxis(
         axis_label="humidity",
         # x_range_name='foo',
         y_range_name='foo')
+    plot.add_layout(Legend(), 'below')
     hum_y.axis_label_text_color = 'blue'
 
     # trying to get high & low bounds for temp y axis
@@ -156,20 +193,28 @@ def plot_data():
     # print(f"\tfloor: {floor}\tceiling: {ceiling}")
 
     lows = set()
-    for st in streams:
-        lows.update(streams[st].temperature_data)
+    earlyiest_td = []
+    for st in streams.values():
+        lows.update(st.temperature_data)
+        print(f"\t\t{st.name}\tlen temp data: {len(st.temperature_data)}")
+        td = [tim for tim in st.time_data if tim is not nan]
+        if len(td) > 0:
+            print(f"\t\t\tearliest:{td[0]}\tlen: {len(td)}")
+            earlyiest_td.append(min(td))
 
     lows.discard(nan)
     floor = int(min(lows) / 5) * 5
     ceiling = (int(max(lows) / 5) * 5) + 5
 
-    # floor = 30
-    # ceiling = 100
-    plot.y_range = Range1d(floor, ceiling)
-    # x = list(range(1, len(temperature_data) + 1))
+    now = datetime.now()
+    earliest = now - min(earlyiest_td)
+    if earliest > plot_time_range:
+        earliest = plot_time_range
 
-    x = list(range(1, LEN_TEMP_DATA + 1))
-    plot.x_range = Range1d(x[0]-1, x[-1]+2)
+    print(f"floor: {floor}\tceiling: {ceiling}\tearliest: {earliest}")
+
+    plot.y_range = Range1d(floor, ceiling)
+    plot.x_range = Range1d(now - earliest, now)
     plot.add_layout(hum_y, "right")
     plot.add_layout(Title(text="Temp in °F",
                           align="center",
@@ -178,17 +223,45 @@ def plot_data():
                     "left")
     # plot.step(x, temperature_data, mode="center", color="red")
     # plot.step(x, humidity_data, mode="center",
-    #           color="blue", y_range_name="foo")
-    for st in streams:
-        plot.step(x, streams[st].temperature_data, mode="center",
-                  color=streams[st].temp_line_color,
-                  line_dash=streams[st].line_dash,
-                  legend_label=st)
-        plot.step(x, streams[st].humidity_data, mode="center",
-                  color=streams[st].hum_line_color,
-                  line_dash=streams[st].line_dash, y_range_name="foo",
-                  legend_label=st)
+    #           color="bl ue", y_range_name="foo")
+    for st in streams.values():
+        print(f"checking the data integrity of {st.name}: ", end='')
+        good_time = [d for d in st.time_data if d is not nan]
+        # good_data = [d for d in st.temperature_data if d is not nan]
+        # good_humi = [d for d in st.humidity_data if d is not nan]
+        # plot.step(x, streams[st].temperature_data, mode="center",
+        # plot.step(time.strptime(streams[st].time_data, time_format_string),
+        # plot.step(streams[st].time_data,
+        #           streams[st].temperature_data,
+        if len(good_time) > 0:
+            print("good!")
+            good_data = [d for d in st.temperature_data if d is not nan]
+            good_humi = [d for d in st.humidity_data if d is not nan]
+            plot.step(good_time,
+                      good_data,
+                      mode="center",
+                      color=st.temp_line_color,
+                      line_dash=st.line_dash,
+                      legend_label=st.name)
+            # plot.step(x, streams[st].humidity_data, mode="center",
+            # plot.step(time.strptime(streams[st].time_data, time_format_string),
+            plot.step(good_time,
+                      good_humi,
+                      mode="center",
+                      color=st.hum_line_color,
+                      line_dash=st.line_dash, y_range_name="foo",
+                      legend_label=st.name)
+        else:
+            print(
+                f"skipping {st.name} because it has {len(good_time)} good data")
     script, div = components(plot)
+    old_script, old_div = script, div
+    previous_plot = now
+
+    # with open(data_dir + "/" + "data.pickle", "wb") as fp:
+    with open(data_dir + "/" + "plot_bak.pickle", "wb") as fp:
+        plot_pickle = {"script": script, "div": div}
+        pickle.dump(plot_pickle, fp)
     socketio.emit('draw_plot', {'plot_script': script,
                   'plot_div': div}, namespace='/')
 
@@ -247,6 +320,11 @@ def handle_connect():
     # mqtt.subscribe('test/webserver')
     emit("data", esp8266_data)
     emit("mqtt_message", "null")
+    if (old_script is not None) & (old_div is not None):
+        socketio.emit('draw_plot', {'plot_script': old_script,
+                      'plot_div': old_div}, namespace='/')
+    else:
+        task_queue.put((plot_data, [], {}))
 
 
 @socketio.on('disconnect')
@@ -274,6 +352,34 @@ def handle_mqtt_message(client, userdata, message):
     print(f"-->received topic: [{data["topic"]}]")
     print(
         f"-->received msg:\n\t{data["payload"]}\tlength: {len(data["payload"])}")
+    # here be hacks
+    if data["topic"] in initial_locations:
+        print("********\nnormal data message\n*********")
+        task_queue.put((data_mqtt_message, [data], {}))
+    else:
+        print("uh oh something interesting: ", end="")
+        addr, end = data["topic"].rsplit("/", 1)
+        for strm in streams.values():
+            if strm.mqtt_address == addr:
+                if end == "mqtt_reset":
+                    strm.mqtt_resets = int(data["payload"])
+                elif end == "wireless_reset":
+                    strm.wireless_resets = int(data["payload"])
+                elif end == "watchdog_reset":
+                    # the devices can keep track of mqtt or
+                    # wireless reset totals, but watchdog resets
+                    # need to be incremented on the server end
+                    strm.watchdog_resets += 1
+                # elif end == "read_vsys":
+                elif end == "power_status":
+                    # strm.vsys = float(data["payload"])
+                    strm.vsys = data["payload"]
+                print(f"{strm.name} had {end} event")
+                task_queue.put(
+                    (socketio.emit, ['mqtt_message', data], {"namespace": '/'}))
+
+
+def data_mqtt_message(data):
     try:
         temp = data["payload"].replace('\x00', '')
         try:
@@ -282,6 +388,7 @@ def handle_mqtt_message(client, userdata, message):
         except json.decoder.JSONDecodeError:
             esp8266_data = json.loads(temp.replace("'", '"'))
             print("(bad quotes in string) ", end='')
+        # here be switches
         if isinstance(esp8266_data, dict):
             print("json data decoded to dict\n----------------------")
             # for k in esp8266_data.keys(): print(f"\t{k}:\t{esp8266_data[k]}")
@@ -297,13 +404,14 @@ def handle_mqtt_message(client, userdata, message):
                 (socketio.emit, ["data", temperature], {"namespace": '/'}))
             # task_queue.put((append_data,
             if streams[esp8266_data.get('device', {})] is not None:
-            # if streams[data.get('topic', {})] is not None:
+                # if streams[data.get('topic', {})] is not None:
                 task_queue.put(
-                    (streams[esp8266_data.get('device', {})].append_data,
-                    # (streams[data.get('topic', {})].append_data,
-                     [],
+                    # (streams[esp8266_data.get('device', {})].append_data,
+                    (time_check, [streams[esp8266_data.get('device', {})]],
+                     # (streams[data.get('topic', {})].append_data,
                      {"new_temp": temperature,
-                      "new_humidity": humidity}))
+                      "new_humidity": humidity})
+                )   # end task_queue.put
         else:
             print(f"data returned as type {type(data["payload"])}")
             # socketio.emit("data", data["payload"], namespace='/')
@@ -314,13 +422,10 @@ def handle_mqtt_message(client, userdata, message):
         print(f"error: {e}")
         esp8266_data = data["payload"]
         socketio.emit("data", data["payload"], namespace='/')
-    return_data = f"snd->{esp8266_data}"
-    # socketio.emit("data", return_data, namespace='/')
-    # socketio.emit('mqtt_message', data=data, namespace='/')
+    # return_data = f"snd->{esp8266_data}"
     task_queue.put((socketio.emit, ['mqtt_message', data], {"namespace": '/'}))
-    # mqtt.publish('test/littleguy', return_data.encode())
-    task_queue.put(
-        (mqtt.publish, ['test/littleguy', return_data.encode()], {}))
+    # task_queue.put(
+    #     (mqtt.publish, ['test/littleguy', return_data.encode()], {}))
 
 
 if __name__ == '__main__':

@@ -12,9 +12,9 @@ h1 {
 
 #div_goes_here {
   margin:auto;
-  width: 80%;
-  max-width: 700px;
-  height: 300px;
+  /* width: 80%; */
+  max-width: 904px;
+  height: 504px;
   border: 2px solid;
   border-radius: 5px;
 }
