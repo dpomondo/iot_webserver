@@ -20,7 +20,7 @@ from bokeh.resources import CDN
 from bokeh.embed import components
 from utilities import make_filename
 # from datastream import DataStream, temperature_colors, humidity_colors, dashes
-from datastream import DataStream
+from class_datastream import DataStream
 
 app = Flask(__name__)
 task_queue = queue.Queue()
@@ -37,7 +37,7 @@ previous_plot = datetime.now() - plot_delta
 time_format_string = "%Y-%m-%dT%H:%M:%S"
 
 
-def time_check(strm, new_temp, new_humidity):
+def time_check(strm, new_temp, temp_sensor, new_humidity, humidity_sensor):
     if (new_temp == nan) or (new_humidity == nan):
         raise ValueError("Trying to append nan to time series")
     now = datetime.now()
@@ -46,6 +46,16 @@ def time_check(strm, new_temp, new_humidity):
         task_queue.put((strm.append_data, [new_temp, new_humidity], {}))
         strm.previous_write = now   # should this be INSIDE the class method?
         strm.new_data_flag = True
+
+    if now > strm.previous_disk_write + timedelta(minutes=10):
+        task_queue.put((write_data_csv, [], {
+                       "name": strm.name,
+                        "time": now,
+                        "new_temp": new_temp,
+                        "temp_sensor": temp_sensor,
+                        "new_humidity": new_humidity,
+                        "humidity_sensor": humidity_sensor}))
+        strm.previous_disk_write = now
 
     global previous_plot
     if now > previous_plot + plot_delta:
@@ -90,7 +100,8 @@ def handle_mqtt_connect(client, userdata, flags, rc):
                 initial_names[nam],
                 initial_locations[nam],
                 LEN_TEMP_DATA,
-                write_delta)
+                write_delta,
+                disk_write_delta)
             print(f"new object:\n\t{streams[initial_names[nam]]}")
 
         for k in streams:
@@ -117,7 +128,7 @@ if not os.path.isfile(data_dir + "/" + "data.pickle"):
     # fp = open("data.pickle", "x")
     fp = open(data_dir + "/" + "data.pickle", "x")
     fp.close()
-    big_coount = -1
+    big_count = -1
 else:
     try:
         with open(data_dir + "/" + "data.pickle", "rb") as fp:
@@ -292,6 +303,35 @@ def take_in_data():
     return incoming_data
 
 
+def write_data_csv(name, time, new_temp, temp_sensor, new_humidity, humidity_sensor):
+    fil_nam = data_dir + "/" + make_filename()
+    # tim_stam = datetime.now.strftime(time_format_string)
+    tim_stam = time.strftime(time_format_string)
+    if not os.path.isfile(fil_nam):
+        with open(fil_nam, 'x', newline='') as csvfile:
+            header_writer = csv.writer(csvfile, delimiter=',')
+            header_writer.writerow(["time",
+                                   "device",
+                                    "temp_f",
+                                    "temp_sensor",
+                                    "error_flag_t",
+                                    "humidity",
+                                    "humidity_sensor",
+                                    "error_flag_h"])
+    target = []
+    target.append(tim_stam)
+    target.append(name)
+    target.append(new_temp)
+    target.append(temp_sensor)
+    target.append("None")
+    target.append(new_humidity)
+    target.append(humidity_sensor)
+    target.append("None")
+    with open(fil_nam, 'a',  newline='') as csvfile:
+        target_writer = csv.writer(csvfile, delimiter=',')
+        target_writer.writerow(target)
+
+
 # @app.route('/', methods=['GET', 'POST'])
 @app.route('/', methods=['GET'])
 def index():
@@ -410,7 +450,10 @@ def data_mqtt_message(data):
                     (time_check, [streams[esp8266_data.get('device', {})]],
                      # (streams[data.get('topic', {})].append_data,
                      {"new_temp": temperature,
-                      "new_humidity": humidity})
+                      "temp_sensor": esp8266_data.get('temp_f', {}).get('sensor', None),
+                      "new_humidity": humidity,
+                      "humidity_sensor": esp8266_data.get('humidity', {}).get('sensor', None)}
+                     )
                 )   # end task_queue.put
         else:
             print(f"data returned as type {type(data["payload"])}")

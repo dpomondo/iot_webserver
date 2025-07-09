@@ -10,7 +10,8 @@ data_dir = "data"
 
 
 class DataStream:
-    def __init__(self, name, mqtt_address, data_length, time_delta):
+    def __init__(self, name, mqtt_address, data_length, time_delta, 
+                 disk_write_delta):
         self.name = name
         self.mqtt_address = mqtt_address
 
@@ -25,19 +26,23 @@ class DataStream:
         # get rid of this hardcoded number
         self.data_length = data_length
         self.write_delta = time_delta
+        self.disk_write_delta = disk_write_delta
         self.line_dash = dashes.pop()
         self.temp_line_color = temperature_colors.pop()
         self.hum_line_color = humidity_colors.pop()
         self.previous_write = datetime.now() - self.write_delta
+        self.previous_disk_write = datetime.now() - self.write_delta
         self.new_data_flag = False
         try:
-            with open(data_dir + "/" + str(self.name).replace("/", "_") + ".pickle", "rb") as fp:
+            with open(data_dir + "/" + str(self.name).replace("/", "_") +
+                      ".pickle", "rb") as fp:
                 bak = pickle.load(fp)
                 self.temperature_data = bak["temp"]
                 self.humidity_data = bak["humidity"]
                 self.time_data = bak["time"]
         except FileNotFoundError:
-            fp = open(data_dir + "/" + self.name.replace("/", "_") + ".pickle", "x")
+            fp = open(data_dir + "/" +
+                      self.name.replace("/", "_") + ".pickle", "x")
             fp.close()
             print("File Not Found, setting all values to nan")
             for i in range(self.data_length):
